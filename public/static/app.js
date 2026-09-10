@@ -10,6 +10,17 @@ import { renderDepenses } from './views/depenses.js'
 import { renderCommunes } from './views/communes.js'
 import { renderComptables } from './views/comptables.js'
 import { renderParametres } from './views/parametres.js'
+import { initConnectivityMonitor, mountConnectivityBar } from './offline/connectivity.js'
+import { startAutoSync, onSyncEvent } from './offline/sync.js'
+import { toast } from './utils.js'
+
+function registerServiceWorker() {
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').catch(() => {
+      // silencieux : l'app reste utilisable sans SW, juste sans cache hors-ligne complet
+    })
+  }
+}
 
 const root = document.getElementById('app')
 
@@ -88,6 +99,25 @@ async function resolveView(hash) {
 
 window.addEventListener('hashchange', router)
 window.addEventListener('DOMContentLoaded', async () => {
+  registerServiceWorker()
+  initConnectivityMonitor()
+  mountConnectivityBar()
+  startAutoSync()
+
+  let lastSyncSuccess = 0
+  onSyncEvent((event) => {
+    if (event.phase === 'end' && event.success > 0) {
+      toast(`${event.success} opération(s) synchronisée(s) avec succès`, 'success')
+      // Rafraîchit la vue courante pour remplacer les données provisoires par les définitives
+      if (['#/membres', '#/paiements', '#/depenses', '#/'].includes(location.hash || '#/')) {
+        router()
+      }
+    }
+    if (event.phase === 'item-error') {
+      toast(`Erreur de synchronisation : ${event.error}`, 'error')
+    }
+  })
+
   await loadParametresPublics()
   router()
 })

@@ -11,6 +11,7 @@ import parametresRoutes from './routes/parametres'
 import dashboardRoutes from './routes/dashboard'
 import uploadsRoutes from './routes/uploads'
 import usersRoutes from './routes/users'
+import { SERVICE_WORKER_SOURCE } from './sw-source'
 
 const app = new Hono<{ Bindings: Bindings }>()
 
@@ -27,6 +28,17 @@ app.route('/api/parametres', parametresRoutes)
 app.route('/api/dashboard', dashboardRoutes)
 app.route('/api/upload', uploadsRoutes)
 app.route('/api/users', usersRoutes)
+
+// Service Worker servi à la racine (scope complet) pour le mode hors-ligne
+app.get('/sw.js', (c) => {
+  return new Response(SERVICE_WORKER_SOURCE, {
+    headers: {
+      'Content-Type': 'application/javascript',
+      'Service-Worker-Allowed': '/',
+      'Cache-Control': 'no-cache'
+    }
+  })
+})
 
 // Lecture des fichiers stockés sur R2 (photos, justificatifs, logo)
 app.get('/api/files/*', async (c) => {
@@ -51,6 +63,11 @@ app.get('*', (c) => {
   <title>SNAMUG GESTION</title>
   <meta name="theme-color" content="#0A3D91" />
   <link rel="manifest" href="/static/manifest.json" />
+  <!-- PWA iOS -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="SNAMUG" />
+  <link rel="apple-touch-icon" href="/static/icon-192.png" />
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js"></script>

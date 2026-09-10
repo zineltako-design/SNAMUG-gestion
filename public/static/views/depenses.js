@@ -1,9 +1,10 @@
-import { API, apiErrorMessage } from '../api.js'
+import { apiErrorMessage } from '../api.js'
 import { formatMoney, formatDate, toast, openModal, closeModal, badgeStatutPaiement, escapeHtml } from '../utils.js'
+import { listDepenses, createDepense } from '../offline/offline-api.js'
+import { isOnline } from '../offline/connectivity.js'
 
 export async function renderDepenses() {
-  const { data } = await API.get('/depenses')
-  const depenses = data.depenses
+  const { depenses, source } = await listDepenses()
 
   setTimeout(() => attachHandlers(), 0)
 
@@ -15,6 +16,8 @@ export async function renderDepenses() {
           <i class="fas fa-plus"></i> Nouvelle dépense
         </button>
       </div>
+
+      ${source === 'cache' ? `<div class="text-xs text-yellow-700 bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2"><i class="fas fa-database mr-1"></i>Données locales (hors-ligne) — la liste sera actualisée au retour du réseau.</div>` : ''}
 
       <div class="card overflow-x-auto">
         <table class="w-full text-sm">
@@ -29,20 +32,25 @@ export async function renderDepenses() {
             </tr>
           </thead>
           <tbody>
-            ${depenses.map(d => `
-              <tr class="border-b last:border-0 hover:bg-gray-50">
-                <td class="py-2 px-4">${formatDate(d.date_depense)}</td>
-                <td class="py-2 px-4 font-medium">${escapeHtml(d.libelle)}</td>
-                <td class="py-2 px-4">${escapeHtml(d.categorie) || '-'}</td>
-                <td class="py-2 px-4 font-medium text-red-700">${formatMoney(d.montant)}</td>
-                <td class="py-2 px-4">${d.justificatif_url ? `<a href="${d.justificatif_url}" target="_blank" class="text-blue-600 hover:underline"><i class="fas fa-image"></i> Voir</a>` : '-'}</td>
-                <td class="py-2 px-4">${badgeStatutPaiement(d.statut)}</td>
-              </tr>
-            `).join('') || `<tr><td colspan="6" class="py-6 text-center text-gray-400">Aucune dépense enregistrée</td></tr>`}
+            ${depenses.map(d => rowHtml(d)).join('') || `<tr><td colspan="6" class="py-6 text-center text-gray-400">Aucune dépense enregistrée</td></tr>`}
           </tbody>
         </table>
       </div>
     </div>
+  `
+}
+
+function rowHtml(d) {
+  const isPending = !!d._pending
+  return `
+    <tr class="border-b last:border-0 hover:bg-gray-50 ${isPending ? 'row-pending' : ''}">
+      <td class="py-2 px-4">${formatDate(d.date_depense)}</td>
+      <td class="py-2 px-4 font-medium">${escapeHtml(d.libelle)} ${isPending ? '<i class="fas fa-clock ml-1 text-yellow-600" title="En attente de synchronisation"></i>' : ''}</td>
+      <td class="py-2 px-4">${escapeHtml(d.categorie) || '-'}</td>
+      <td class="py-2 px-4 font-medium text-red-700">${formatMoney(d.montant)}</td>
+      <td class="py-2 px-4">${d.justificatif_url ? `<a href="${d.justificatif_url}" target="_blank" class="text-blue-600 hover:underline"><i class="fas fa-image"></i> Voir</a>` : '-'}</td>
+      <td class="py-2 px-4">${isPending ? '<span class="badge-attente px-2 py-1 rounded text-xs font-semibold">En attente sync.</span>' : badgeStatutPaiement(d.statut)}</td>
+    </tr>
   `
 }
 
@@ -51,9 +59,14 @@ function attachHandlers() {
 }
 
 function openNewDepenseModal() {
+  const offlineNotice = !isOnline()
+    ? `<div class="text-xs text-yellow-700 bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2 mb-3"><i class="fas fa-exclamation-triangle mr-1"></i>Mode hors-ligne : la dépense (et sa photo) sera enregistrée localement puis synchronisée automatiquement dès le retour du réseau.</div>`
+    : ''
+
   openModal(`
     <div class="p-6">
       <h2 class="text-lg font-bold text-gray-800 mb-4"><i class="fas fa-receipt mr-2 text-red-600"></i>Nouvelle dépense</h2>
+      ${offlineNotice}
       <form id="form-new-depense" class="space-y-3">
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Libellé *</label>
@@ -107,22 +120,19 @@ function openNewDepenseModal() {
 
     try {
       const fileInput = document.getElementById('justificatif-file')
-      let justificatif_url = null
-      if (fileInput.files[0]) {
-        const fd = new FormData()
-        fd.append('file', fileInput.files[0])
-        fd.append('dossier', 'justificatifs')
-        const { data: uploadData } = await API.post('/upload', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
-        justificatif_url = uploadData.url
-      }
+      const fileBlob = fileInput.files[0] || null
 
       const fd2 = new FormData(form)
       const payload = Object.fromEntries(fd2.entries())
-      payload.justificatif_url = justificatif_url
+      delete payload.justificatif_url
 
-      await API.post('/depenses', payload)
+      const result = await createDepense(payload, fileBlob)
       closeModal()
-      toast('Dépense enregistrée avec succès', 'success')
+      if (result.offline) {
+        toast('Dépense enregistrée localement (hors-ligne). Elle sera synchronisée automatiquement.', 'info')
+      } else {
+        toast('Dépense enregistrée avec succès', 'success')
+      }
       renderDepenses().then(html => {
         document.getElementById('page-content').innerHTML = html
         attachHandlers()

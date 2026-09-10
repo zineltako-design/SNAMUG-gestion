@@ -83,3 +83,35 @@ body {
   .no-print { display: none !important; }
   body { background: white; }
 }
+
+/* --- Mode hors-ligne / synchronisation --- */
+.connectivity-bar {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 200;
+  text-align: center;
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 0.5rem 1rem;
+  color: white;
+}
+.connectivity-bar.hidden { display: none; }
+.connectivity-bar.bar-offline { background: var(--snamug-rouge); }
+.connectivity-bar.bar-syncing { background: var(--snamug-jaune); color: #4a3900; }
+
+body:has(#connectivity-bar:not(.hidden)) main {
+  padding-top: 2.75rem;
+}
+body:has(#connectivity-bar:not(.hidden)) header.lg\:hidden {
+  margin-top: 2.25rem;
+}
+
+.badge-attente {
+  background: #fff3cd;
+  color: #8a6d00;
+  border: 1px solid var(--snamug-jaune);
+}
+
+.row-pending {
+  background: repeating-linear-gradient(45deg, #fffbe6, #fffbe6 10px, #fff8d6 10px, #fff8d6 20px);
+}

@@ -1,6 +1,8 @@
 import { API } from '../api.js'
 import { store } from '../store.js'
 import { formatMoney, formatDateTime, badgeStatutCotisation, typeLabel, modeLabel } from '../utils.js'
+import { isOnline } from '../offline/connectivity.js'
+import { cacheGetAll, STORES, queueCount } from '../offline/db.js'
 
 function statCard(icon, label, value, color) {
   return `
@@ -93,9 +95,61 @@ export async function renderDashboardNational() {
   `
 }
 
+async function computeStatsOffline() {
+  const annee = new Date().getFullYear()
+  const membres = await cacheGetAll(STORES.MEMBRES)
+  const paiements = await cacheGetAll(STORES.PAIEMENTS)
+  const depenses = await cacheGetAll(STORES.DEPENSES)
+
+  const membresActifs = membres.filter((m) => m.statut === 'actif')
+  const membresAJour = new Set(
+    paiements.filter((p) => p.type === 'cotisation' && String(p.periode_annee) === String(annee)).map((p) => p.membre_id)
+  )
+  const membresEnRetard = membresActifs.filter((m) => !membresAJour.has(m.id)).length
+
+  const totalRecettes = paiements
+    .filter((p) => String(p.periode_annee) === String(annee))
+    .reduce((sum, p) => sum + Number(p.montant), 0)
+  const totalDepenses = depenses
+    .filter((d) => (d.date_depense || '').startsWith(String(annee)))
+    .reduce((sum, d) => sum + Number(d.montant), 0)
+
+  const dernieresOperations = paiements
+    .slice()
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+    .slice(0, 15)
+
+  return {
+    stats: {
+      total_membres: membresActifs.length,
+      membres_en_retard: membresEnRetard,
+      total_recettes_annee: totalRecettes,
+      total_depenses_annee: totalDepenses
+    },
+    dernieresOperations,
+    annee
+  }
+}
+
 export async function renderDashboardCommune() {
-  const { data } = await API.get('/dashboard/commune')
+  let data
+  let hors_ligne = false
+
+  if (isOnline()) {
+    try {
+      const res = await API.get('/dashboard/commune')
+      data = res.data
+    } catch (e) {
+      data = await computeStatsOffline()
+      hors_ligne = true
+    }
+  } else {
+    data = await computeStatsOffline()
+    hors_ligne = true
+  }
+
   const { stats, dernieresOperations, annee } = data
+  const nbEnAttente = await queueCount()
 
   return `
     <div class="space-y-6">
@@ -103,6 +157,8 @@ export async function renderDashboardCommune() {
         <h1 class="text-2xl font-bold text-gray-800">Vue d'ensemble — ${store.commune?.nom || ''}</h1>
         <span class="text-sm text-gray-500">Exercice ${annee}</span>
       </div>
+
+      ${hors_ligne ? `<div class="text-xs text-yellow-700 bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2"><i class="fas fa-database mr-1"></i>Statistiques calculées à partir des données locales (hors-ligne)${nbEnAttente > 0 ? ` — ${nbEnAttente} opération(s) en attente de synchronisation` : ''}.</div>` : ''}
 
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         ${statCard('fa-users', 'Membres actifs', stats.total_membres, 'var(--snamug-bleu)')}

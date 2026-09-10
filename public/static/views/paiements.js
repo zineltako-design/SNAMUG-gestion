@@ -1,10 +1,11 @@
 import { API, apiErrorMessage } from '../api.js'
 import { store } from '../store.js'
 import { formatMoney, formatDateTime, toast, openModal, closeModal, badgeStatutPaiement, typeLabel, modeLabel, escapeHtml } from '../utils.js'
+import { listPaiements, createPaiement, listMembres } from '../offline/offline-api.js'
+import { isOnline } from '../offline/connectivity.js'
 
 export async function renderPaiements() {
-  const { data } = await API.get('/paiements')
-  const paiements = data.paiements
+  const { paiements, source } = await listPaiements()
 
   setTimeout(() => attachHandlers(), 0)
 
@@ -16,6 +17,8 @@ export async function renderPaiements() {
           <i class="fas fa-cash-register"></i> Enregistrer un paiement
         </button>
       </div>
+
+      ${source === 'cache' ? `<div class="text-xs text-yellow-700 bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2"><i class="fas fa-database mr-1"></i>Données locales (hors-ligne) — la liste sera actualisée au retour du réseau.</div>` : ''}
 
       <div class="card overflow-x-auto">
         <table class="w-full text-sm">
@@ -32,22 +35,29 @@ export async function renderPaiements() {
             </tr>
           </thead>
           <tbody>
-            ${paiements.map(p => `
-              <tr class="border-b last:border-0 hover:bg-gray-50">
-                <td class="py-2 px-4 font-mono text-xs text-blue-700">${p.numero_recu}</td>
-                <td class="py-2 px-4 text-gray-500">${formatDateTime(p.created_at)}</td>
-                <td class="py-2 px-4">${escapeHtml(p.membre_prenom)} ${escapeHtml(p.membre_nom)}</td>
-                <td class="py-2 px-4">${typeLabel(p.type)}</td>
-                <td class="py-2 px-4">${modeLabel(p.mode_paiement)}</td>
-                <td class="py-2 px-4 font-medium">${formatMoney(p.montant)}</td>
-                <td class="py-2 px-4">${badgeStatutPaiement(p.statut)}</td>
-                <td class="py-2 px-4"><button class="text-blue-600 hover:underline text-xs btn-recu" data-id="${p.id}">Reçu <i class="fas fa-print"></i></button></td>
-              </tr>
-            `).join('') || `<tr><td colspan="8" class="py-6 text-center text-gray-400">Aucun paiement enregistré</td></tr>`}
+            ${paiements.map(p => rowHtml(p)).join('') || `<tr><td colspan="8" class="py-6 text-center text-gray-400">Aucun paiement enregistré</td></tr>`}
           </tbody>
         </table>
       </div>
     </div>
+  `
+}
+
+function rowHtml(p) {
+  const isPending = !!p._pending
+  return `
+    <tr class="border-b last:border-0 hover:bg-gray-50 ${isPending ? 'row-pending' : ''}">
+      <td class="py-2 px-4 font-mono text-xs ${isPending ? 'text-yellow-700' : 'text-blue-700'}">${escapeHtml(p.numero_recu)} ${isPending ? '<i class="fas fa-clock ml-1" title="En attente de synchronisation"></i>' : ''}</td>
+      <td class="py-2 px-4 text-gray-500">${formatDateTime(p.created_at)}</td>
+      <td class="py-2 px-4">${escapeHtml(p.membre_prenom)} ${escapeHtml(p.membre_nom)}</td>
+      <td class="py-2 px-4">${typeLabel(p.type)}</td>
+      <td class="py-2 px-4">${modeLabel(p.mode_paiement)}</td>
+      <td class="py-2 px-4 font-medium">${formatMoney(p.montant)}</td>
+      <td class="py-2 px-4">${isPending ? '<span class="badge-attente px-2 py-1 rounded text-xs font-semibold">En attente sync.</span>' : badgeStatutPaiement(p.statut)}</td>
+      <td class="py-2 px-4">${isPending
+        ? '<span class="text-gray-400 text-xs">-</span>'
+        : `<button class="text-blue-600 hover:underline text-xs btn-recu" data-id="${p.id}">Reçu <i class="fas fa-print"></i></button>`}</td>
+    </tr>
   `
 }
 
@@ -60,23 +70,35 @@ function attachHandlers() {
 
 async function chercherMembres(query) {
   if (!query || query.length < 2) return []
-  const { data } = await API.get('/membres', { params: { search: query } })
-  return data.membres
+  const { membres } = await listMembres({ search: query })
+  return membres
 }
 
 async function openNewPaiementModal() {
-  const { data: tarifData } = await API.get('/parametres/tarifs/courant').catch(() => ({ data: { tarif: null } }))
-  const tarif = tarifData?.tarif
+  let tarif = null
+  if (isOnline()) {
+    try {
+      const { data } = await API.get('/parametres/tarifs/courant')
+      tarif = data.tarif
+    } catch (e) { /* pas de tarif suggéré si indisponible */ }
+  }
 
-  const overlay = openModal(`
+  const offlineNotice = !isOnline()
+    ? `<div class="text-xs text-yellow-700 bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2 mb-3"><i class="fas fa-exclamation-triangle mr-1"></i>Mode hors-ligne : le paiement sera enregistré localement (reçu provisoire) et synchronisé automatiquement dès le retour du réseau.</div>`
+    : ''
+
+  openModal(`
     <div class="p-6">
       <h2 class="text-lg font-bold text-gray-800 mb-4"><i class="fas fa-cash-register mr-2 text-green-600"></i>Enregistrer un paiement</h2>
+      ${offlineNotice}
       <form id="form-new-paiement" class="space-y-3">
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Membre *</label>
           <input type="text" id="membre-search" placeholder="Rechercher un membre par nom..." class="w-full border rounded-lg px-3 py-2" autocomplete="off" />
           <div id="membre-results" class="border rounded-lg mt-1 max-h-40 overflow-y-auto hidden bg-white shadow"></div>
           <input type="hidden" name="membre_id" required />
+          <input type="hidden" name="membre_nom" />
+          <input type="hidden" name="membre_prenom" />
           <div id="membre-selected" class="mt-1 text-sm text-blue-700 font-medium"></div>
         </div>
         <div class="grid grid-cols-2 gap-3">
@@ -126,6 +148,8 @@ async function openNewPaiementModal() {
   const searchInput = document.getElementById('membre-search')
   const resultsBox = document.getElementById('membre-results')
   const hiddenMembreId = document.querySelector('input[name="membre_id"]')
+  const hiddenMembreNom = document.querySelector('input[name="membre_nom"]')
+  const hiddenMembrePrenom = document.querySelector('input[name="membre_prenom"]')
   const selectedBox = document.getElementById('membre-selected')
 
   let searchTimeout
@@ -138,15 +162,17 @@ async function openNewPaiementModal() {
         return
       }
       resultsBox.innerHTML = results.map(m => `
-        <div class="px-3 py-2 hover:bg-blue-50 cursor-pointer text-sm membre-option" data-id="${m.id}" data-nom="${escapeHtml(m.prenom)} ${escapeHtml(m.nom)}">
-          <div class="font-medium">${escapeHtml(m.prenom)} ${escapeHtml(m.nom)}</div>
-          <div class="text-xs text-gray-500">${m.numero_adhesion}</div>
+        <div class="px-3 py-2 hover:bg-blue-50 cursor-pointer text-sm membre-option" data-id="${m.id}" data-nom="${escapeHtml(m.prenom)} ${escapeHtml(m.nom)}" data-nomonly="${escapeHtml(m.nom)}" data-prenomonly="${escapeHtml(m.prenom)}">
+          <div class="font-medium">${escapeHtml(m.prenom)} ${escapeHtml(m.nom)} ${m._pending ? '<span class="text-yellow-600 text-xs">(en attente sync.)</span>' : ''}</div>
+          <div class="text-xs text-gray-500">${escapeHtml(m.numero_adhesion)}</div>
         </div>
       `).join('')
       resultsBox.classList.remove('hidden')
       resultsBox.querySelectorAll('.membre-option').forEach(opt => {
         opt.addEventListener('click', () => {
           hiddenMembreId.value = opt.dataset.id
+          hiddenMembreNom.value = opt.dataset.nomonly
+          hiddenMembrePrenom.value = opt.dataset.prenomonly
           selectedBox.textContent = `Sélectionné : ${opt.dataset.nom}`
           searchInput.value = opt.dataset.nom
           resultsBox.classList.add('hidden')
@@ -186,14 +212,18 @@ async function openNewPaiementModal() {
     payload.periode_annee = new Date().getFullYear()
 
     try {
-      const { data } = await API.post('/paiements', payload)
+      const result = await createPaiement(payload)
       closeModal()
-      toast(`Paiement enregistré : ${data.paiement.numero_recu}`, 'success')
+      if (result.offline) {
+        toast(`Paiement enregistré localement (hors-ligne). Reçu définitif après synchronisation.`, 'info')
+      } else {
+        toast(`Paiement enregistré : ${result.paiement.numero_recu}`, 'success')
+      }
       renderPaiements().then(html => {
         document.getElementById('page-content').innerHTML = html
         attachHandlers()
       })
-      setTimeout(() => imprimerRecu(data.paiement.id), 300)
+      if (!result.offline) setTimeout(() => imprimerRecu(result.paiement.id), 300)
     } catch (err) {
       const errorBox = document.getElementById('new-paiement-error')
       errorBox.textContent = apiErrorMessage(err)
@@ -203,6 +233,10 @@ async function openNewPaiementModal() {
 }
 
 async function imprimerRecu(id) {
+  if (!isOnline() || String(id).startsWith('tmp_')) {
+    toast('Le reçu définitif sera disponible après synchronisation.', 'warning')
+    return
+  }
   const { data } = await API.get(`/paiements/${id}`)
   const p = data.paiement
   const params = store.parametres || {}

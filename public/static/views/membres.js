@@ -1,20 +1,21 @@
 import { API, apiErrorMessage } from '../api.js'
 import { store } from '../store.js'
 import { formatDate, toast, openModal, closeModal, badgeStatutCotisation, escapeHtml } from '../utils.js'
+import { listMembres, createMembre } from '../offline/offline-api.js'
+import { isOnline } from '../offline/connectivity.js'
 
 let communesCache = null
 
 async function getCommunes() {
-  if (!communesCache) {
+  if (!communesCache && isOnline()) {
     const { data } = await API.get('/communes')
     communesCache = data.communes
   }
-  return communesCache
+  return communesCache || []
 }
 
 export async function renderMembres() {
-  const { data } = await API.get('/membres')
-  const membres = data.membres
+  const { membres, source } = await listMembres()
   const isNational = store.user.role === 'secretaire'
 
   setTimeout(() => attachHandlers(), 0)
@@ -27,6 +28,8 @@ export async function renderMembres() {
           <i class="fas fa-user-plus"></i> Nouvelle adhésion
         </button>
       </div>
+
+      ${source === 'cache' ? `<div class="text-xs text-yellow-700 bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2"><i class="fas fa-database mr-1"></i>Données locales (hors-ligne) — la liste sera actualisée au retour du réseau.</div>` : ''}
 
       <div class="card p-3">
         <input type="text" id="search-membre" placeholder="Rechercher par nom, prénom ou numéro d'adhésion..."
@@ -57,17 +60,20 @@ export async function renderMembres() {
 }
 
 function rowHtml(m, isNational) {
+  const isPending = !!m._pending
   return `
-    <tr class="border-b last:border-0 hover:bg-gray-50 membre-row" data-nom="${escapeHtml((m.nom + ' ' + m.prenom + ' ' + m.numero_adhesion).toLowerCase())}">
-      <td class="py-2 px-4 font-mono text-xs text-blue-700">${m.numero_adhesion}</td>
+    <tr class="border-b last:border-0 hover:bg-gray-50 membre-row ${isPending ? 'row-pending' : ''}" data-nom="${escapeHtml((m.nom + ' ' + m.prenom + ' ' + m.numero_adhesion).toLowerCase())}">
+      <td class="py-2 px-4 font-mono text-xs ${isPending ? 'text-yellow-700' : 'text-blue-700'}">${escapeHtml(m.numero_adhesion)} ${isPending ? '<i class="fas fa-clock ml-1" title="En attente de synchronisation"></i>' : ''}</td>
       <td class="py-2 px-4 font-medium">${escapeHtml(m.prenom)} ${escapeHtml(m.nom)}</td>
       ${isNational ? `<td class="py-2 px-4">${escapeHtml(m.commune_nom)}</td>` : ''}
       <td class="py-2 px-4">${escapeHtml(m.telephone) || '-'}</td>
       <td class="py-2 px-4">${escapeHtml(m.discipline) || '-'}</td>
       <td class="py-2 px-4">${formatDate(m.date_adhesion)}</td>
-      <td class="py-2 px-4">${badgeStatutCotisation(m.statut_cotisation)}</td>
+      <td class="py-2 px-4">${isPending ? '<span class="badge-attente px-2 py-1 rounded text-xs font-semibold">En attente sync.</span>' : badgeStatutCotisation(m.statut_cotisation)}</td>
       <td class="py-2 px-4">
-        <button class="text-blue-600 hover:underline text-xs btn-view-membre" data-id="${m.id}">Voir <i class="fas fa-chevron-right"></i></button>
+        ${isPending
+          ? '<span class="text-gray-400 text-xs">Non synchronisé</span>'
+          : `<button class="text-blue-600 hover:underline text-xs btn-view-membre" data-id="${m.id}">Voir <i class="fas fa-chevron-right"></i></button>`}
       </td>
     </tr>
   `
@@ -76,10 +82,11 @@ function rowHtml(m, isNational) {
 function attachHandlers() {
   const searchInput = document.getElementById('search-membre')
   if (searchInput) {
+    let searchTimeout
     searchInput.addEventListener('input', () => {
-      const q = searchInput.value.toLowerCase()
+      const q = searchInput.value
       document.querySelectorAll('.membre-row').forEach(row => {
-        row.style.display = row.dataset.nom.includes(q) ? '' : 'none'
+        row.style.display = row.dataset.nom.includes(q.toLowerCase()) ? '' : 'none'
       })
     })
   }
@@ -99,9 +106,14 @@ async function openNewMembreModal() {
     communesOptions = communes.filter(c => c.actif).map(c => `<option value="${c.id}">${c.nom}</option>`).join('')
   }
 
-  const overlay = openModal(`
+  const offlineNotice = !isOnline()
+    ? `<div class="text-xs text-yellow-700 bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2 mb-3"><i class="fas fa-exclamation-triangle mr-1"></i>Mode hors-ligne : l'adhésion sera enregistrée localement et synchronisée automatiquement dès le retour du réseau. Le numéro d'adhésion définitif sera attribué à la synchronisation.</div>`
+    : ''
+
+  openModal(`
     <div class="p-6">
       <h2 class="text-lg font-bold text-gray-800 mb-4"><i class="fas fa-user-plus mr-2 text-blue-600"></i>Nouvelle adhésion</h2>
+      ${offlineNotice}
       <form id="form-new-membre" class="space-y-3">
         <div class="grid grid-cols-2 gap-3">
           <div>
@@ -175,11 +187,15 @@ async function openNewMembreModal() {
     payload.creer_compte = fd.get('creer_compte') === 'on'
 
     try {
-      const { data } = await API.post('/membres', payload)
+      const result = await createMembre(payload)
       closeModal()
-      toast(`Membre inscrit : ${data.membre.numero_adhesion}`, 'success')
-      if (data.mot_de_passe_genere) {
-        toast(`Mot de passe généré pour l'accès mobile : ${data.mot_de_passe_genere}`, 'info')
+      if (result.offline) {
+        toast(`Adhésion enregistrée localement (hors-ligne). Elle sera synchronisée automatiquement.`, 'info')
+      } else {
+        toast(`Membre inscrit : ${result.membre.numero_adhesion}`, 'success')
+        if (result.mot_de_passe_genere) {
+          toast(`Mot de passe généré pour l'accès mobile : ${result.mot_de_passe_genere}`, 'info')
+        }
       }
       renderMembres().then(html => {
         document.getElementById('page-content').innerHTML = html
@@ -194,6 +210,10 @@ async function openNewMembreModal() {
 }
 
 async function openMembreDetail(id) {
+  if (!isOnline()) {
+    toast('Détail complet indisponible hors-ligne pour ce membre.', 'warning')
+    return
+  }
   const { data } = await API.get(`/membres/${id}`)
   const m = data.membre
   const historique = data.historique
@@ -234,3 +254,4 @@ async function openMembreDetail(id) {
   `)
   document.getElementById('btn-close-detail').addEventListener('click', closeModal)
 }
+
