@@ -2,7 +2,7 @@
 // Servi à la racine (/sw.js) pour couvrir tout le scope de l'application.
 
 export const SERVICE_WORKER_SOURCE = `
-const CACHE_NAME = 'snamug-shell-v1';
+const CACHE_NAME = 'snamug-shell-v2';
 
 const APP_SHELL = [
   '/',
@@ -22,6 +22,8 @@ const APP_SHELL = [
   '/static/views/communes.js',
   '/static/views/comptables.js',
   '/static/views/parametres.js',
+  '/static/views/projets.js',
+  '/static/views/cloture.js',
   '/static/offline/db.js',
   '/static/offline/sync.js',
   '/static/offline/connectivity.js',

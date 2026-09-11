@@ -11,6 +11,8 @@ import parametresRoutes from './routes/parametres'
 import dashboardRoutes from './routes/dashboard'
 import uploadsRoutes from './routes/uploads'
 import usersRoutes from './routes/users'
+import projetsRoutes from './routes/projets'
+import exercicesRoutes from './routes/exercices'
 import { SERVICE_WORKER_SOURCE } from './sw-source'
 
 const app = new Hono<{ Bindings: Bindings }>()
@@ -28,6 +30,8 @@ app.route('/api/parametres', parametresRoutes)
 app.route('/api/dashboard', dashboardRoutes)
 app.route('/api/upload', uploadsRoutes)
 app.route('/api/users', usersRoutes)
+app.route('/api/projets', projetsRoutes)
+app.route('/api/exercices', exercicesRoutes)
 
 // Service Worker servi à la racine (scope complet) pour le mode hors-ligne
 app.get('/sw.js', (c) => {

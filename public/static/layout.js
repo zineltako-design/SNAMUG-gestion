@@ -8,6 +8,8 @@ const MENUS = {
     { hash: '#/membres', icon: 'fa-users', label: 'Membres' },
     { hash: '#/paiements', icon: 'fa-money-bill-wave', label: 'Paiements' },
     { hash: '#/depenses', icon: 'fa-receipt', label: 'Dépenses' },
+    { hash: '#/projets', icon: 'fa-hand-holding-usd', label: 'Projets & Budgets' },
+    { hash: '#/cloture', icon: 'fa-archive', label: 'Clôture annuelle' },
     { hash: '#/comptables', icon: 'fa-user-tie', label: 'Comptables' },
     { hash: '#/parametres', icon: 'fa-cog', label: 'Paramètres' },
   ],

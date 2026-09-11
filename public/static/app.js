@@ -10,6 +10,8 @@ import { renderDepenses } from './views/depenses.js'
 import { renderCommunes } from './views/communes.js'
 import { renderComptables } from './views/comptables.js'
 import { renderParametres } from './views/parametres.js'
+import { renderProjets } from './views/projets.js'
+import { renderCloture } from './views/cloture.js'
 import { initConnectivityMonitor, mountConnectivityBar } from './offline/connectivity.js'
 import { startAutoSync, onSyncEvent } from './offline/sync.js'
 import { toast } from './utils.js'
@@ -92,6 +94,8 @@ async function resolveView(hash) {
   if (hash === '#/communes' && role === 'secretaire') return await renderCommunes()
   if (hash === '#/comptables' && role === 'secretaire') return await renderComptables()
   if (hash === '#/parametres' && role === 'secretaire') return await renderParametres()
+  if (hash === '#/projets' && role === 'secretaire') return await renderProjets()
+  if (hash === '#/cloture' && role === 'secretaire') return await renderCloture()
   if (hash === '#/mes-paiements' && role === 'membre') return await renderDashboardMembre()
 
   return `<div class="card p-6 text-center text-gray-400"><i class="fas fa-map-signs text-3xl mb-2"></i><br/>Page introuvable</div>`

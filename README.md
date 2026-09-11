@@ -6,7 +6,9 @@
 - **Phases livrées** :
   - **Phase 1 — Socle** (authentification par rôle, communes configurables, membres, cotisations/dons, dépenses locales, dashboards, paramètres visuels).
   - **Phase 2 — Mode hors-ligne (PWA/offline-first)** : le Comptable Communal peut inscrire des membres, encaisser des paiements et saisir des dépenses (avec photo justificative) même sans connexion internet ; synchronisation automatique dès le retour du réseau.
-- **Phases à venir** : Module Projets & Budgets (bailleurs, lignes budgétaires codifiées), Clôture annuelle & archivage.
+  - **Phase 3 — Projets & Budgets** : gestion des projets financés par des bailleurs, lignes budgétaires codifiées en arborescence, imputation des dépenses, suivi du taux d'exécution.
+  - **Phase 4 — Clôture annuelle & archivage** : clôture d'exercice, archive JSON complète sur Cloudflare R2, exports CSV (compatibles Excel) des paiements et dépenses.
+- **Statut** : les 4 phases planifiées sont livrées. Reste à faire sur demande : déploiement en production Cloudflare Pages, notifications automatiques, exports PDF/ZIP avancés.
 
 ## URLs
 - **Aperçu sandbox (temporaire)** : https://3000-ikgvwauwini4ailfvpy2v-de59bda9.sandbox.novita.ai
@@ -38,6 +40,34 @@
 - Paramétrage des tarifs de cotisation annuelle et d'adhésion.
 - Vue et validation de tous les paiements/dépenses de toutes les communes.
 
+## Phase 3 — Projets & Budgets
+
+**Objectif** : permettre au Secrétaire National de suivre les projets financés par des bailleurs (UNESCO, Union Européenne, etc.), avec une structure budgétaire codifiée et une imputation précise des dépenses.
+
+### Fonctionnement
+- **Projets** : nom, bailleur, montant total, devise (GNF/USD/EUR), période, statut (actif/suspendu/clôturé). Création et modification réservées au Secrétaire National ; lecture accessible aux Comptables Communaux pour l'imputation des dépenses.
+- **Lignes budgétaires codifiées** : arborescence de rubriques et sous-lignes (codes du type `1`, `1.1`, `1.1.1`), chacune avec un montant alloué. Une ligne ne peut être supprimée si des dépenses y sont déjà imputées ou si elle possède des sous-lignes.
+- **Imputation des dépenses** : lors de la saisie d'une dépense (Comptable ou Secrétaire), un projet actif et une ligne budgétaire peuvent être sélectionnés (optionnel — une dépense peut rester "hors projet"). Le serveur vérifie que la ligne appartient bien au projet indiqué.
+- **Taux d'exécution** : calculé automatiquement par ligne budgétaire (dépenses validées / montant alloué) et globalement pour le projet (dépenses / montant total), affiché avec une barre de progression colorée (vert/jaune/rouge selon le niveau).
+- **Détail projet** : vue consolidée avec arborescence des lignes, montants alloués/dépensés/taux par ligne, et liste des dépenses imputées.
+
+### Limite connue
+- L'imputation à un projet n'est pas disponible en mode hors-ligne (nécessite une connexion pour charger la liste des projets actifs et leurs lignes budgétaires) ; la dépense peut toujours être saisie hors-ligne sans imputation, puis modifiée après synchronisation si besoin.
+
+## Phase 4 — Clôture annuelle & archivage
+
+**Objectif** : permettre au Secrétaire National de clôturer formellement un exercice comptable annuel, en figeant les totaux et en générant une archive complète et durable.
+
+### Fonctionnement
+- **Exercices** : un exercice (année civile) est créé automatiquement dès qu'il est consulté. Statut `ouvert` (totaux calculés dynamiquement en temps réel) ou `cloture` (totaux figés).
+- **Clôture** : action réservée au Secrétaire National. Calcule les totaux définitifs (recettes, dépenses, solde par commune) et génère une **archive JSON complète** (paramètres, statistiques, liste intégrale des paiements et dépenses de l'année) stockée sur **Cloudflare R2**, consultable via un lien direct. Une clôture déjà effectuée ne peut être répétée (protection contre l'écrasement accidentel).
+- **Réouverture exceptionnelle** : le Secrétaire National peut réouvrir un exercice clôturé pour corriger une erreur ; l'archive précédente reste accessible et une nouvelle clôture générera une archive à jour.
+- **Exports CSV (compatibles Excel)** : disponibles à tout moment (exercice ouvert ou clôturé) pour les paiements (`/api/exercices/:annee/export.csv?type=paiements`) et les dépenses (`?type=depenses`, avec colonnes projet/ligne budgétaire), encodés en UTF-8 avec BOM pour un affichage correct des accents dans Excel.
+- **Vue détaillée** : ventilation des recettes/dépenses/solde par commune pour l'année sélectionnée, accessible sans clôturer.
+
+### Limite connue
+- Les exports PDF et l'archivage au format ZIP (mentionnés dans le cahier des charges initial) ne sont pas encore implémentés ; l'archive JSON et les exports CSV couvrent la même donnée et permettent déjà un archivage et un reporting complets.
+
 ## Phase 2 — Mode hors-ligne (PWA / offline-first)
 
 **Objectif** : permettre au Comptable Communal de continuer à travailler (inscriptions, encaissements, dépenses) sans connexion internet, avec synchronisation automatique et sans perte de données au retour du réseau.
@@ -68,11 +98,13 @@
 - `GET/POST/PUT/DELETE /api/communes` — gestion des communes (secrétaire national)
 - `GET/POST/PUT /api/membres` — gestion des membres (comptable = sa commune, secrétaire = toutes)
 - `GET/POST /api/paiements`, `PUT /api/paiements/:id/statut` — cotisations/adhésions/dons
-- `GET/POST /api/depenses` — dépenses locales avec justificatif
+- `GET/POST /api/depenses` — dépenses locales avec justificatif, avec imputation optionnelle `projet_id`/`ligne_budgetaire_id`
 - `GET/PUT /api/parametres`, `GET/POST /api/parametres/tarifs` — paramètres app et tarifs
 - `GET /api/dashboard/national|commune|membre` — tableaux de bord par rôle
 - `GET/POST /api/users`, `PUT /api/users/:id/statut`, `POST /api/users/:id/reset-password` — gestion des comptes comptables/secrétaires
-- `POST /api/upload`, `GET /api/files/*` — upload/lecture fichiers (photos, justificatifs, logo) sur Cloudflare R2
+- `POST /api/upload`, `GET /api/files/*` — upload/lecture fichiers (photos, justificatifs, logo, archives) sur Cloudflare R2
+- `GET/POST/PUT /api/projets`, `POST/PUT/DELETE /api/projets/:id/lignes/:ligneId` — projets bailleurs et lignes budgétaires codifiées (Phase 3)
+- `GET /api/exercices`, `GET /api/exercices/:annee`, `GET /api/exercices/:annee/export.csv?type=paiements|depenses`, `POST /api/exercices/:annee/cloturer`, `POST /api/exercices/:annee/reouvrir` — clôture annuelle et archivage (Phase 4)
 
 ## Architecture des données (Cloudflare D1 — SQLite)
 - `communes` — communes configurables (nom, code, région, actif)
@@ -80,19 +112,19 @@
 - `membres` — fiches d'adhésion, numéro unique, statut
 - `tarifs_cotisation` — montants par année
 - `paiements` — adhésions/cotisations/dons avec reçu numéroté, mode de paiement, statut de validation
-- `depenses` — dépenses locales avec justificatif (URL R2)
-- `projets`, `lignes_budgetaires` — **structure déjà créée en base** pour la Phase 3 (Projets & Budgets), non encore exposée dans l'interface
-- `exercices` — **structure déjà créée** pour la Phase 4 (clôture annuelle), non encore exposée
+- `depenses` — dépenses locales avec justificatif (URL R2), imputation optionnelle `projet_id`/`ligne_budgetaire_id`
+- `projets` — projets financés par des bailleurs (nom, bailleur, montant total, devise, période, statut)
+- `lignes_budgetaires` — arborescence de rubriques/sous-lignes codifiées par projet (code, libellé, montant alloué, parent_id)
+- `exercices` — exercices annuels avec statut ouvert/clôturé, totaux figés à la clôture, lien vers l'archive R2
 - `parametres` — identité visuelle et configuration générale
 - `notifications` — table prête pour les alertes (non encore utilisée dans l'UI)
 
-**Stockage fichiers** : Cloudflare R2 (photos justificatives, logo).
+**Stockage fichiers** : Cloudflare R2 (photos justificatives, logo, archives JSON de clôture d'exercice).
 
 ## Ce qui N'EST PAS encore implémenté
-- Module Projets/Bailleurs et lignes budgétaires codifiées avec imputation des dépenses — schéma DB prêt, interface à construire en **Phase 3**.
-- Clôture annuelle, génération de bilan PDF/Excel/ZIP, archives consultables — **Phase 4**.
 - Notifications automatiques (retards de cotisation, dépassement budgétaire).
-- Export PDF/Excel des rapports (actuellement seul le reçu de paiement est imprimable).
+- Exports PDF et archivage au format ZIP (l'archive JSON et les exports CSV de la Phase 4 couvrent déjà les mêmes données).
+- Imputation projet/ligne budgétaire lors d'une saisie de dépense en mode hors-ligne (nécessite une connexion pour charger la liste des projets).
 - Déploiement en production sur Cloudflare Pages (à faire sur demande).
 
 ## Guide d'utilisation rapide
@@ -102,9 +134,11 @@
 4. Depuis **Paiements**, enregistrer les cotisations/adhésions/dons ; un reçu imprimable est généré automatiquement.
 5. Le Secrétaire National suit en temps réel la situation de toutes les communes depuis **Vue d'ensemble**.
 6. Dans **Paramètres**, personnaliser le nom, le logo et les couleurs de l'application, ainsi que les tarifs annuels.
+7. Dans **Projets & Budgets**, créer un projet bailleur, y ajouter des rubriques/sous-lignes budgétaires codifiées, puis imputer les dépenses correspondantes depuis **Dépenses** (champ "Projet" optionnel).
+8. En fin d'année, dans **Clôture annuelle**, vérifier les totaux de l'exercice puis cliquer sur **Clôturer l'exercice** pour figer les chiffres et générer l'archive ; les exports CSV (paiements/dépenses) restent disponibles à tout moment.
 
 ## Déploiement
 - **Plateforme cible** : Cloudflare Pages (Hono + D1 + R2)
 - **Statut actuel** : ❌ Non déployé en production — tourne en local sandbox (Wrangler dev + D1/R2 locaux)
 - **Stack technique** : Hono (TypeScript) + Vite + Cloudflare Workers/D1/R2, frontend vanilla JS modulaire + TailwindCSS (CDN)
-- **Dernière mise à jour** : 2026-09-10 (Phase 2 — mode hors-ligne)
+- **Dernière mise à jour** : 2026-09-11 (Phase 3 — Projets & Budgets ; Phase 4 — Clôture annuelle & archivage)

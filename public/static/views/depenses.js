@@ -1,4 +1,4 @@
-import { apiErrorMessage } from '../api.js'
+import { API, apiErrorMessage } from '../api.js'
 import { formatMoney, formatDate, toast, openModal, closeModal, badgeStatutPaiement, escapeHtml } from '../utils.js'
 import { listDepenses, createDepense } from '../offline/offline-api.js'
 import { isOnline } from '../offline/connectivity.js'
@@ -26,13 +26,14 @@ export async function renderDepenses() {
               <th class="py-3 px-4">Date</th>
               <th class="py-3 px-4">Libellé</th>
               <th class="py-3 px-4">Catégorie</th>
+              <th class="py-3 px-4">Projet / Ligne</th>
               <th class="py-3 px-4">Montant</th>
               <th class="py-3 px-4">Justificatif</th>
               <th class="py-3 px-4">Statut</th>
             </tr>
           </thead>
           <tbody>
-            ${depenses.map(d => rowHtml(d)).join('') || `<tr><td colspan="6" class="py-6 text-center text-gray-400">Aucune dépense enregistrée</td></tr>`}
+            ${depenses.map(d => rowHtml(d)).join('') || `<tr><td colspan="7" class="py-6 text-center text-gray-400">Aucune dépense enregistrée</td></tr>`}
           </tbody>
         </table>
       </div>
@@ -47,6 +48,7 @@ function rowHtml(d) {
       <td class="py-2 px-4">${formatDate(d.date_depense)}</td>
       <td class="py-2 px-4 font-medium">${escapeHtml(d.libelle)} ${isPending ? '<i class="fas fa-clock ml-1 text-yellow-600" title="En attente de synchronisation"></i>' : ''}</td>
       <td class="py-2 px-4">${escapeHtml(d.categorie) || '-'}</td>
+      <td class="py-2 px-4 text-xs">${d.projet_nom ? `<span class="badge-bleu px-2 py-0.5 rounded">${escapeHtml(d.projet_nom)}</span>${d.ligne_code ? `<br/><span class="text-gray-400">${escapeHtml(d.ligne_code)} — ${escapeHtml(d.ligne_libelle)}</span>` : ''}` : '<span class="text-gray-400">Hors projet</span>'}</td>
       <td class="py-2 px-4 font-medium text-red-700">${formatMoney(d.montant)}</td>
       <td class="py-2 px-4">${d.justificatif_url ? `<a href="${d.justificatif_url}" target="_blank" class="text-blue-600 hover:underline"><i class="fas fa-image"></i> Voir</a>` : '-'}</td>
       <td class="py-2 px-4">${isPending ? '<span class="badge-attente px-2 py-1 rounded text-xs font-semibold">En attente sync.</span>' : badgeStatutPaiement(d.statut)}</td>
@@ -58,10 +60,37 @@ function attachHandlers() {
   document.getElementById('btn-new-depense')?.addEventListener('click', openNewDepenseModal)
 }
 
-function openNewDepenseModal() {
+async function chargerProjetsActifs() {
+  if (!isOnline()) return []
+  try {
+    const { data } = await API.get('/projets', { params: { statut: 'actif' } })
+    return data.projets
+  } catch (e) { return [] }
+}
+
+async function chargerLignesProjet(projetId) {
+  if (!projetId || !isOnline()) return []
+  try {
+    const { data } = await API.get(`/projets/${projetId}`)
+    // aplati l'arbre pour la liste déroulante
+    const flat = []
+    function walk(lignes, depth = 0) {
+      for (const l of lignes) {
+        flat.push({ id: l.id, label: `${'— '.repeat(depth)}${l.code} — ${l.libelle}` })
+        if (l.enfants?.length) walk(l.enfants, depth + 1)
+      }
+    }
+    walk(data.lignes_budgetaires)
+    return flat
+  } catch (e) { return [] }
+}
+
+async function openNewDepenseModal() {
   const offlineNotice = !isOnline()
-    ? `<div class="text-xs text-yellow-700 bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2 mb-3"><i class="fas fa-exclamation-triangle mr-1"></i>Mode hors-ligne : la dépense (et sa photo) sera enregistrée localement puis synchronisée automatiquement dès le retour du réseau.</div>`
+    ? `<div class="text-xs text-yellow-700 bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2 mb-3"><i class="fas fa-exclamation-triangle mr-1"></i>Mode hors-ligne : la dépense (et sa photo) sera enregistrée localement puis synchronisée automatiquement dès le retour du réseau. L'imputation à un projet n'est pas disponible hors-ligne.</div>`
     : ''
+
+  const projets = await chargerProjetsActifs()
 
   openModal(`
     <div class="p-6">
@@ -93,6 +122,22 @@ function openNewDepenseModal() {
           <label class="block text-sm font-medium text-gray-700 mb-1">Date de la dépense</label>
           <input type="date" name="date_depense" value="${new Date().toISOString().slice(0, 10)}" class="w-full border rounded-lg px-3 py-2" />
         </div>
+        ${projets.length > 0 ? `
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Projet (optionnel)</label>
+            <select name="projet_id" id="depense-projet" class="w-full border rounded-lg px-3 py-2">
+              <option value="">— Dépense hors projet —</option>
+              ${projets.map(p => `<option value="${p.id}">${escapeHtml(p.nom)}</option>`).join('')}
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Ligne budgétaire</label>
+            <select name="ligne_budgetaire_id" id="depense-ligne" class="w-full border rounded-lg px-3 py-2" disabled>
+              <option value="">— Sélectionner un projet d'abord —</option>
+            </select>
+          </div>
+        </div>` : ''}
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Pièce justificative (photo)</label>
           <input type="file" id="justificatif-file" accept="image/*" class="w-full border rounded-lg px-3 py-2" />
@@ -109,6 +154,25 @@ function openNewDepenseModal() {
       </form>
     </div>
   `)
+
+  const projetSelect = document.getElementById('depense-projet')
+  const ligneSelect = document.getElementById('depense-ligne')
+  if (projetSelect && ligneSelect) {
+    projetSelect.addEventListener('change', async () => {
+      const projetId = projetSelect.value
+      if (!projetId) {
+        ligneSelect.innerHTML = '<option value="">— Sélectionner un projet d\'abord —</option>'
+        ligneSelect.disabled = true
+        return
+      }
+      ligneSelect.disabled = true
+      ligneSelect.innerHTML = '<option value="">Chargement...</option>'
+      const lignes = await chargerLignesProjet(projetId)
+      ligneSelect.innerHTML = '<option value="">— Aucune ligne (imputation globale au projet) —</option>' +
+        lignes.map(l => `<option value="${l.id}">${escapeHtml(l.label)}</option>`).join('')
+      ligneSelect.disabled = lignes.length === 0
+    })
+  }
 
   document.getElementById('btn-cancel-depense').addEventListener('click', closeModal)
   document.getElementById('form-new-depense').addEventListener('submit', async (e) => {
