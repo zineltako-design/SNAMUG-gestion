@@ -27,6 +27,13 @@ export interface Commune {
   created_at: string
 }
 
+export interface Localite {
+  id: number
+  commune_id: number
+  nom: string
+  created_at: string
+}
+
 export interface User {
   id: number
   email: string | null

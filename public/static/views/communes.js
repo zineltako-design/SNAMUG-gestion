@@ -7,6 +7,30 @@ export async function renderCommunes() {
 
   setTimeout(() => attachHandlers(), 0)
 
+  // Regroupement par région pour lisibilité (Régions administratives de Guinée + Conakry)
+  const parRegion = new Map()
+  for (const c of communes) {
+    const region = (c.region || 'Autre').trim() || 'Autre'
+    if (!parRegion.has(region)) parRegion.set(region, [])
+    parRegion.get(region).push(c)
+  }
+  const regions = Array.from(parRegion.keys()).sort((a, b) => a.localeCompare(b, 'fr'))
+
+  const carteCommune = (c) => `
+    <div class="card p-4 flex items-center justify-between">
+      <div>
+        <div class="font-bold text-gray-800">${escapeHtml(c.nom)}</div>
+        <div class="text-xs text-gray-500">Code : ${escapeHtml(c.code)}</div>
+        <span class="inline-block mt-1 text-xs px-2 py-0.5 rounded ${c.actif ? 'badge-vert' : 'badge-rouge'}">${c.actif ? 'Active' : 'Inactive'}</span>
+      </div>
+      <div class="flex gap-2">
+        <button class="text-blue-600 btn-edit-commune" data-id="${c.id}" data-nom="${escapeHtml(c.nom)}" data-code="${escapeHtml(c.code)}" data-region="${escapeHtml(c.region || '')}" data-actif="${c.actif}">
+          <i class="fas fa-edit"></i>
+        </button>
+      </div>
+    </div>
+  `
+
   return `
     <div class="space-y-4">
       <div class="flex items-center justify-between flex-wrap gap-2">
@@ -15,24 +39,22 @@ export async function renderCommunes() {
           <i class="fas fa-plus"></i> Ajouter une commune
         </button>
       </div>
-      <p class="text-sm text-gray-500">Configurez librement les communes gérées par le SNAMUG (le nombre n'est pas limité à 13).</p>
+      <p class="text-sm text-gray-500">
+        Configurez librement les communes (unités comptables) gérées par le SNAMUG — le découpage administratif
+        complet de la Guinée (7 régions, ${communes.length} préfectures/communes) est préchargé, et vous pouvez en ajouter d'autres.
+      </p>
 
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        ${communes.map(c => `
-          <div class="card p-4 flex items-center justify-between">
-            <div>
-              <div class="font-bold text-gray-800">${escapeHtml(c.nom)}</div>
-              <div class="text-xs text-gray-500">Code : ${escapeHtml(c.code)} ${c.region ? '— ' + escapeHtml(c.region) : ''}</div>
-              <span class="inline-block mt-1 text-xs px-2 py-0.5 rounded ${c.actif ? 'badge-vert' : 'badge-rouge'}">${c.actif ? 'Active' : 'Inactive'}</span>
-            </div>
-            <div class="flex gap-2">
-              <button class="text-blue-600 btn-edit-commune" data-id="${c.id}" data-nom="${escapeHtml(c.nom)}" data-code="${escapeHtml(c.code)}" data-region="${escapeHtml(c.region || '')}" data-actif="${c.actif}">
-                <i class="fas fa-edit"></i>
-              </button>
-            </div>
+      ${regions.map(region => `
+        <section class="space-y-2">
+          <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-2">
+            <i class="fas fa-map-marked-alt text-blue-600"></i> Région ${escapeHtml(region)}
+            <span class="text-xs font-normal text-gray-400">(${parRegion.get(region).length} commune${parRegion.get(region).length > 1 ? 's' : ''})</span>
+          </h2>
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            ${parRegion.get(region).map(carteCommune).join('')}
           </div>
-        `).join('') || '<div class="text-gray-400 col-span-full text-center py-6">Aucune commune configurée</div>'}
-      </div>
+        </section>
+      `).join('') || '<div class="text-gray-400 text-center py-6">Aucune commune configurée</div>'}
     </div>
   `
 }
@@ -62,7 +84,17 @@ function openCommuneModal(commune = null) {
         </div>
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Région</label>
-          <input name="region" value="${commune?.region || ''}" class="w-full border rounded-lg px-3 py-2" />
+          <input name="region" list="regions-guinee" value="${commune?.region || ''}" class="w-full border rounded-lg px-3 py-2" placeholder="ex: Kindia, Boké, Conakry..." />
+          <datalist id="regions-guinee">
+            <option value="Conakry"></option>
+            <option value="Kindia"></option>
+            <option value="Boké"></option>
+            <option value="Mamou"></option>
+            <option value="Labé"></option>
+            <option value="Faranah"></option>
+            <option value="Kankan"></option>
+            <option value="N'Zérékoré"></option>
+          </datalist>
         </div>
         ${isEdit ? `
         <label class="flex items-center gap-2 text-sm text-gray-700">

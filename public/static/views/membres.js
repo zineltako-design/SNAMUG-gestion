@@ -1,6 +1,6 @@
 import { API, apiErrorMessage } from '../api.js'
 import { store } from '../store.js'
-import { formatDate, toast, openModal, closeModal, badgeStatutCotisation, escapeHtml } from '../utils.js'
+import { formatDate, toast, openModal, closeModal, badgeStatutCotisation, escapeHtml, communesOptgroupsHtml } from '../utils.js'
 import { listMembres, createMembre } from '../offline/offline-api.js'
 import { isOnline } from '../offline/connectivity.js'
 
@@ -103,7 +103,7 @@ async function openNewMembreModal() {
   let communesOptions = ''
   if (isNational) {
     const communes = await getCommunes()
-    communesOptions = communes.filter(c => c.actif).map(c => `<option value="${c.id}">${c.nom}</option>`).join('')
+    communesOptions = communesOptgroupsHtml(communes)
   }
 
   const offlineNotice = !isOnline()
@@ -163,7 +163,8 @@ async function openNewMembreModal() {
         </div>
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Adresse</label>
-          <input name="adresse" class="w-full border rounded-lg px-3 py-2" />
+          <input name="adresse" list="localites-suggestions" class="w-full border rounded-lg px-3 py-2" placeholder="Quartier / localité..." />
+          <datalist id="localites-suggestions"></datalist>
         </div>
         <label class="flex items-center gap-2 text-sm text-gray-700">
           <input type="checkbox" name="creer_compte" checked class="rounded" />
@@ -179,6 +180,21 @@ async function openNewMembreModal() {
   `)
 
   document.getElementById('btn-cancel-membre').addEventListener('click', closeModal)
+
+  const communeSelect = document.querySelector('select[name="commune_id"]')
+  if (communeSelect && isOnline()) {
+    communeSelect.addEventListener('change', async () => {
+      const datalist = document.getElementById('localites-suggestions')
+      if (!datalist || !communeSelect.value) return
+      try {
+        const { data } = await API.get(`/communes/${communeSelect.value}/localites`)
+        datalist.innerHTML = (data.localites || []).map(l => `<option value="${escapeHtml(l.nom)}"></option>`).join('')
+      } catch {
+        datalist.innerHTML = ''
+      }
+    })
+  }
+
   document.getElementById('form-new-membre').addEventListener('submit', async (e) => {
     e.preventDefault()
     const form = e.target

@@ -2,7 +2,7 @@
 // Servi à la racine (/sw.js) pour couvrir tout le scope de l'application.
 
 export const SERVICE_WORKER_SOURCE = `
-const CACHE_NAME = 'snamug-shell-v2';
+const CACHE_NAME = 'snamug-shell-v3';
 
 const APP_SHELL = [
   '/',

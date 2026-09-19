@@ -5,9 +5,44 @@ import { authRequired, requireRole } from '../middleware/auth'
 const communes = new Hono<{ Bindings: Bindings }>()
 
 // Liste des communes (accessible à tous les rôles authentifiés)
+// Tri par région puis par nom pour faciliter le regroupement côté frontend (<optgroup>)
 communes.get('/', authRequired, async (c) => {
-  const { results } = await c.env.DB.prepare('SELECT * FROM communes ORDER BY nom ASC').all()
+  const { results } = await c.env.DB.prepare(
+    "SELECT * FROM communes ORDER BY (region IS NULL), region ASC, nom ASC"
+  ).all()
   return c.json({ communes: results })
+})
+
+// Liste des communes regroupées par région : [{ region, communes: [...] }]
+// Pratique pour construire directement des <optgroup> côté frontend
+communes.get('/groupees', authRequired, async (c) => {
+  const { results } = await c.env.DB.prepare(
+    "SELECT * FROM communes WHERE actif = 1 ORDER BY (region IS NULL), region ASC, nom ASC"
+  ).all()
+
+  const groupes: { region: string; communes: any[] }[] = []
+  const index: Record<string, any[]> = {}
+  for (const commune of results as any[]) {
+    const region = commune.region || 'Autre'
+    if (!index[region]) {
+      index[region] = []
+      groupes.push({ region, communes: index[region] })
+    }
+    index[region].push(commune)
+  }
+
+  return c.json({ groupes })
+})
+
+// Liste des localités (communes/secteurs) d'une préfecture-commune
+communes.get('/:id/localites', authRequired, async (c) => {
+  const id = c.req.param('id')
+  const { results } = await c.env.DB.prepare(
+    'SELECT * FROM localites WHERE commune_id = ? ORDER BY nom ASC'
+  )
+    .bind(id)
+    .all()
+  return c.json({ localites: results })
 })
 
 // Détail d'une commune + statistiques rapides

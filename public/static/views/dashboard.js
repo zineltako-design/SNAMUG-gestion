@@ -26,7 +26,7 @@ export async function renderDashboardNational() {
     <div class="space-y-6">
       <div class="flex items-center justify-between flex-wrap gap-2">
         <h1 class="text-2xl font-bold text-gray-800">Vue d'ensemble nationale — ${annee}</h1>
-        <span class="text-sm text-gray-500"><i class="fas fa-sync-alt mr-1"></i>Supervision en temps réel des 13 communes</span>
+        <span class="text-sm text-gray-500"><i class="fas fa-sync-alt mr-1"></i>Supervision en temps réel des ${globalStats.total_communes} communes</span>
       </div>
 
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

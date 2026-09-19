@@ -1,5 +1,5 @@
 import { API, apiErrorMessage } from '../api.js'
-import { formatDateTime, toast, openModal, closeModal, escapeHtml } from '../utils.js'
+import { formatDateTime, toast, openModal, closeModal, escapeHtml, communesOptgroupsHtml } from '../utils.js'
 
 export async function renderComptables() {
   const { data } = await API.get('/users')
@@ -77,7 +77,7 @@ function attachHandlers(communes) {
 }
 
 function openUserModal(communes) {
-  const communesOptions = communes.filter(c => c.actif).map(c => `<option value="${c.id}">${c.nom}</option>`).join('')
+  const communesOptions = communesOptgroupsHtml(communes)
 
   openModal(`
     <div class="p-6">

@@ -85,3 +85,37 @@ export function initialsAvatar(nom, prenom) {
   const i2 = (nom || '').charAt(0).toUpperCase()
   return i1 + i2
 }
+
+// Construit les <option>/<optgroup> d'un <select> de communes, regroupées par région.
+// communes : tableau plat [{id, nom, code, region, actif, ...}, ...]
+// selectedId : valeur pré-sélectionnée (optionnel)
+export function communesOptgroupsHtml(communes, selectedId = '') {
+  const actives = (communes || []).filter(c => c.actif)
+  const parRegion = new Map()
+  for (const c of actives) {
+    const region = (c.region || 'Autre').trim() || 'Autre'
+    if (!parRegion.has(region)) parRegion.set(region, [])
+    parRegion.get(region).push(c)
+  }
+  const regions = Array.from(parRegion.keys()).sort((a, b) => a.localeCompare(b, 'fr'))
+
+  const optionHtml = (c) => {
+    const sel = String(c.id) === String(selectedId) ? 'selected' : ''
+    return `<option value="${c.id}" ${sel}>${escapeHtml(c.nom)}${c.code ? ' (' + escapeHtml(c.code) + ')' : ''}</option>`
+  }
+
+  // Une seule région (ex: uniquement Conakry) : pas besoin de regrouper visuellement
+  if (regions.length <= 1) {
+    return actives
+      .sort((a, b) => a.nom.localeCompare(b.nom, 'fr'))
+      .map(optionHtml)
+      .join('')
+  }
+
+  return regions
+    .map(region => {
+      const communesRegion = parRegion.get(region).sort((a, b) => a.nom.localeCompare(b.nom, 'fr'))
+      return `<optgroup label="${escapeHtml(region)}">${communesRegion.map(optionHtml).join('')}</optgroup>`
+    })
+    .join('')
+}

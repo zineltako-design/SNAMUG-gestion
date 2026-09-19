@@ -8,6 +8,7 @@
   - **Phase 2 — Mode hors-ligne (PWA/offline-first)** : le Comptable Communal peut inscrire des membres, encaisser des paiements et saisir des dépenses (avec photo justificative) même sans connexion internet ; synchronisation automatique dès le retour du réseau.
   - **Phase 3 — Projets & Budgets** : gestion des projets financés par des bailleurs, lignes budgétaires codifiées en arborescence, imputation des dépenses, suivi du taux d'exécution.
   - **Phase 4 — Clôture annuelle & archivage** : clôture d'exercice, archive JSON complète sur Cloudflare R2, exports CSV (compatibles Excel) des paiements et dépenses.
+  - **Enrichissement géographique** : intégration du découpage administratif complet de la Guinée (7 régions, 33 préfectures, 306 localités) dans le référentiel des communes.
 - **Statut** : les 4 phases planifiées sont livrées. Reste à faire sur demande : déploiement en production Cloudflare Pages, notifications automatiques, exports PDF/ZIP avancés.
 
 ## URLs
@@ -17,7 +18,7 @@
 ## Comptes de démonstration
 | Rôle | Identifiant | Mot de passe |
 |---|---|---|
-| Secrétaire Comptable National | `admin@snamug.gn` ou `620000000` | `Snamug2026!` (à changer à la 1ère connexion) |
+| Secrétaire Comptable National | `admin@snamug.gn` ou `620000000` | `Snamug@2026!` |
 
 > Les comptables communaux et membres sont créés depuis l'interface (Secrétaire National → onglet "Comptables" ; Comptable → onglet "Membres"). Un mot de passe temporaire est généré automatiquement et affiché à la création.
 
@@ -33,8 +34,8 @@
 - Tableau de bord de sa commune (membres à jour/en retard, recettes/dépenses de l'année).
 
 ### 3. Secrétaire Comptable National (Administrateur)
-- Supervision temps réel des 13 communes (et plus, communes entièrement configurables) : membres, recettes, dépenses, solde par commune.
-- Gestion des communes (créer/modifier/désactiver — nombre non limité à 13).
+- Supervision temps réel des 46 communes préchargées (Conakry + les 7 régions administratives de Guinée, communes entièrement configurables) : membres, recettes, dépenses, solde par commune.
+- Gestion des communes (créer/modifier/désactiver — nombre non limité), regroupées par région pour la lisibilité.
 - Gestion des comptes Comptables Communaux et Secrétaires (création, réinitialisation mot de passe, activation/désactivation).
 - Paramétrage de l'identité visuelle (nom de l'app, logo à uploader manuellement, couleurs bleu/rouge/jaune/vert).
 - Paramétrage des tarifs de cotisation annuelle et d'adhésion.
@@ -68,6 +69,31 @@
 ### Limite connue
 - Les exports PDF et l'archivage au format ZIP (mentionnés dans le cahier des charges initial) ne sont pas encore implémentés ; l'archive JSON et les exports CSV couvrent la même donnée et permettent déjà un archivage et un reporting complets.
 
+## Enrichissement géographique — Découpage administratif de la Guinée
+
+**Objectif** : compléter la sélection des communes avec le référentiel administratif réel de la Guinée (Régions → Préfectures → Communes/Localités), au lieu de se limiter aux 13 communes de Conakry saisies manuellement.
+
+### Modélisation retenue
+- Chaque **Région** administrative (Kindia, Boké, Mamou, Labé, Faranah, Kankan, N'Zérékoré) regroupe plusieurs **Préfectures**.
+- Chaque **Préfecture** (avec son code, ex. `COY` pour Coyah) devient une nouvelle ligne dans la table `communes` existante — exactement comme les communes de Conakry (`KLM`, `DIX`, ...). Elle fonctionne donc immédiatement comme une **unité comptable à part entière** : un Comptable Communal peut y être affecté, des membres y être inscrits, des paiements/dépenses y être imputés. Le champ `region` de la commune porte le nom de la Région administrative parente.
+- Les **Communes/Localités** de chaque préfecture (ex. `Kindia-Centre`, `Damakania`, `Friguiagbé`...) sont stockées dans une nouvelle table de référence **`localites`** (FK `commune_id`), purement informative — utilisée pour suggérer des noms de quartier/localité (champ *Adresse*) sans créer une nouvelle unité comptable par localité.
+- Résultat : **46 communes** actives (13 Conakry + 33 préfectures) et **306 localités** de référence, sans aucune donnée existante supprimée ou modifiée.
+
+### Backend
+- Migration `migrations/0002_geo_guinee.sql` : création de la table `localites`, nettoyage des régions historiques (espaces parasites), insertion des 33 préfectures (`INSERT OR IGNORE` — rejouable sans doublon) et de leurs 306 localités.
+- `GET /api/communes` : tri désormais par région puis par nom.
+- `GET /api/communes/groupees` : nouvel endpoint renvoyant les communes actives déjà regroupées par région (`[{ region, communes: [...] }]`), pratique pour construire des `<optgroup>`.
+- `GET /api/communes/:id/localites` : nouvel endpoint renvoyant les localités de référence d'une commune (préfecture) donnée.
+
+### Frontend
+- Nouvel utilitaire partagé `communesOptgroupsHtml()` (`public/static/utils.js`) : génère les `<option>`/`<optgroup>` d'un `<select>` de communes regroupées par région, réutilisé dans **Membres** (nouvelle adhésion) et **Comptables** (création de compte).
+- **Communes** (vue admin) : la liste est maintenant affichée par section "Région" avec un compteur, au lieu d'une grille plate — plus lisible avec 46 entrées. Le formulaire de création/édition propose une liste suggérée (`<datalist>`) des 8 régions connues pour garder une saisie cohérente.
+- **Membres** (nouvelle adhésion) : le champ *Adresse* propose désormais une suggestion (`<datalist>`) des localités de la préfecture sélectionnée, chargée dynamiquement via `/api/communes/:id/localites` au changement de commune.
+- Tableau de bord national : le libellé "Supervision en temps réel des 13 communes" est désormais dynamique (`globalStats.total_communes`).
+
+### Limite connue
+- Les localités ne sont qu'un référentiel d'aide à la saisie (champ libre avec suggestions) ; elles ne sont pas rattachées formellement à la fiche membre (pas de colonne `localite_id`) et ne portent aucune comptabilité propre — seule la commune (préfecture) reste l'unité comptable.
+
 ## Phase 2 — Mode hors-ligne (PWA / offline-first)
 
 **Objectif** : permettre au Comptable Communal de continuer à travailler (inscriptions, encaissements, dépenses) sans connexion internet, avec synchronisation automatique et sans perte de données au retour du réseau.
@@ -96,6 +122,8 @@
 - `GET /api/auth/me` — profil courant
 - `POST /api/auth/change-password` — changement de mot de passe
 - `GET/POST/PUT/DELETE /api/communes` — gestion des communes (secrétaire national)
+- `GET /api/communes/groupees` — communes actives regroupées par région (pour `<optgroup>`)
+- `GET /api/communes/:id/localites` — localités (communes/secteurs) de référence d'une préfecture-commune
 - `GET/POST/PUT /api/membres` — gestion des membres (comptable = sa commune, secrétaire = toutes)
 - `GET/POST /api/paiements`, `PUT /api/paiements/:id/statut` — cotisations/adhésions/dons
 - `GET/POST /api/depenses` — dépenses locales avec justificatif, avec imputation optionnelle `projet_id`/`ligne_budgetaire_id`
@@ -107,7 +135,8 @@
 - `GET /api/exercices`, `GET /api/exercices/:annee`, `GET /api/exercices/:annee/export.csv?type=paiements|depenses`, `POST /api/exercices/:annee/cloturer`, `POST /api/exercices/:annee/reouvrir` — clôture annuelle et archivage (Phase 4)
 
 ## Architecture des données (Cloudflare D1 — SQLite)
-- `communes` — communes configurables (nom, code, région, actif)
+- `communes` — communes configurables (nom, code, région, actif) ; préchargées avec les 13 communes de Conakry + les 33 préfectures des 7 régions administratives de Guinée (46 au total)
+- `localites` — référentiel des communes/secteurs (localités) de chaque préfecture (`commune_id`, `nom`) — 306 entrées préchargées, usage informatif (suggestion d'adresse)
 - `users` — comptes (membre/comptable/secretaire), cloisonnés par `commune_id`
 - `membres` — fiches d'adhésion, numéro unique, statut
 - `tarifs_cotisation` — montants par année
@@ -129,7 +158,7 @@
 
 ## Guide d'utilisation rapide
 1. Se connecter avec le compte Secrétaire National (voir identifiants ci-dessus) et changer le mot de passe.
-2. Aller dans **Comptables** → créer un compte Comptable Communal pour chaque commune active.
+2. Aller dans **Comptables** → créer un compte Comptable Communal pour chaque commune active (13 communes de Conakry ou l'une des 33 préfectures des 7 régions, regroupées par région dans le formulaire).
 3. Le comptable se connecte avec son téléphone/mot de passe temporaire, va dans **Membres** → **Nouvelle adhésion** pour inscrire les artistes.
 4. Depuis **Paiements**, enregistrer les cotisations/adhésions/dons ; un reçu imprimable est généré automatiquement.
 5. Le Secrétaire National suit en temps réel la situation de toutes les communes depuis **Vue d'ensemble**.
@@ -141,4 +170,4 @@
 - **Plateforme cible** : Cloudflare Pages (Hono + D1 + R2)
 - **Statut actuel** : ❌ Non déployé en production — tourne en local sandbox (Wrangler dev + D1/R2 locaux)
 - **Stack technique** : Hono (TypeScript) + Vite + Cloudflare Workers/D1/R2, frontend vanilla JS modulaire + TailwindCSS (CDN)
-- **Dernière mise à jour** : 2026-09-11 (Phase 3 — Projets & Budgets ; Phase 4 — Clôture annuelle & archivage)
+- **Dernière mise à jour** : 2026-09-19 (Enrichissement géographique — découpage administratif complet de la Guinée : 7 régions, 33 préfectures, 306 localités)
